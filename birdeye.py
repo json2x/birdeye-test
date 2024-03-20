@@ -1,11 +1,20 @@
 from setting import Settings
 from pydantic import BaseModel
-from typing import Tuple
+from typing import Tuple, Dict, Union
 from decimal import Decimal
 import requests
 
-class PriceInfo(BaseModel):
-    price: Tuple[Decimal, Decimal]
+from typing import Generic, TypeVar
+
+T = TypeVar('T')
+
+class PriceInfo(Generic[T]):
+    def __init__(self, value1: T, value2: T):
+        self.value1 = value1
+        self.value2 = value2
+
+# class TokenOverview(BaseModel):
+#     data: Dict[str, Union[float, str]]
 
 class BirdEyeClient:
 
@@ -42,32 +51,25 @@ class BirdEyeClient:
         if response.status_code != 200:
             raise ValueError(f"Failed to fetch prices for tokens {token_addresses}")
         
-        '''
-        sample response:
-        {
-            "data": {
-                "So11111111111111111111111111111111111111112": {
-                "value": 170.31082412623664,
-                "updateUnixTime": 1710950218,
-                "updateHumanTime": "2024-03-20T15:56:58",
-                "priceChange24h": -7.077326862097751
-                },
-                "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So": {
-                "value": 200.01269444682526,
-                "updateUnixTime": 1710950218,
-                "updateHumanTime": "2024-03-20T15:56:58",
-                "priceChange24h": -6.801589095053282
-                }
-            },
-            "success": true
-        }
-        '''
         return {
-            token: PriceInfo(price=(Decimal(data['value']), Decimal(data['priceChange24h'])))
+            token: PriceInfo(value1=Decimal(data['value']), value2=Decimal(data['priceChange24h']))
             for token, data in response.json()['data'].items()
-        }   
+        }
 
 
 
-    def fetch_token_overview(self, address: str):
-        pass
+    # def fetch_token_overview(self, address: str) -> TokenOverview:
+    #     if not address:
+    #         raise ValueError("No tokens provided")
+        
+    #     url = f'https://public-api.birdeye.so/public/multi_price?list_address={address}'
+    #     response = self._make_api_call('get', url, headers=self._headers)
+        
+    #     if response.status_code != 200:
+    #         raise ValueError(f"Failed to fetch prices for tokens {address}")
+        
+    #     return response.json()
+    #     # return {
+    #     #     token: data
+    #     #     for token, data in response.json()['data'].items()
+    #     # }
