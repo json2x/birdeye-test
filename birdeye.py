@@ -110,3 +110,4 @@ class BirdEyeClient:
             raise InvalidToken(f"Failed to fetch token {address}")
         
         return [t for t in tokenlist_res.json()['data']['tokens'] if t['address'] == address][0]
+    
