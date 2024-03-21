@@ -1,20 +1,46 @@
-from setting import Settings
-from pydantic import BaseModel
-from typing import Tuple, Dict, Union
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import NamedTuple, TypedDict, Union
 from decimal import Decimal
 import requests
 
-from typing import Generic, TypeVar
+class Settings(BaseSettings):
+    BIRD_EYE_TOKEN: str
 
-T = TypeVar('T')
+    model_config = SettingsConfigDict(env_file=".env")
 
-class PriceInfo(Generic[T]):
-    def __init__(self, value1: T, value2: T):
-        self.value1 = value1
-        self.value2 = value2
+class NoPositionsError(Exception):
+    """
+    Exception raised when no positions (tokens) are provided.
+    """
+    def __init__(self, message="No positions provided."):
+        self.message = message
+        super().__init__(self.message)
 
-# class TokenOverview(BaseModel):
-#     data: Dict[str, Union[float, str]]
+class InvalidToken(Exception):
+    """
+    Exception raised when the API call to fetch token prices is unsuccessful.
+    """
+    def __init__(self, message="Failed to fetch token prices."):
+        self.message = message
+        super().__init__(self.message)
+
+class InvalidSolanaAddress(Exception):
+    """
+    Exception raised when invalid solana address is passed.
+    """
+    def __init__(self, message="Invalid solana address."):
+        self.message = message
+        super().__init__(self.message)
+
+class PriceInfo(NamedTuple):
+    price: Decimal
+    liquidity: Decimal
+
+class TokenOverview(TypedDict):
+    key: Union[float, str]
+
+
+# ============================================================== #
 
 class BirdEyeClient:
 
@@ -42,34 +68,45 @@ class BirdEyeClient:
     
     def fetch_prices(self, token_addresses: list[str]) -> dict[str, PriceInfo[Decimal, Decimal]]:
         if not token_addresses:
-            raise ValueError("No tokens provided")
+            raise NoPositionsError("No tokens provided")
         
         token_address_csv = ','.join(token_addresses)
         url = f'https://public-api.birdeye.so/public/multi_price?list_address={token_address_csv}'
-        response = self._make_api_call('get', url, headers=self._headers)
+        multi_price_res = self._make_api_call('get', url, headers=self._headers)
+        if multi_price_res.status_code != 200:
+            raise InvalidToken(f"Failed to fetch prices for tokens {token_addresses}")
         
-        if response.status_code != 200:
-            raise ValueError(f"Failed to fetch prices for tokens {token_addresses}")
+        url = 'https://public-api.birdeye.so/public/tokenlist?sort_by=v24hUSD&sort_type=desc'
+        tokenlist_res = self._make_api_call('get', url, headers=self._headers)
+        if tokenlist_res.status_code != 200:
+            raise InvalidToken(f"Failed to fetch prices for tokens {token_addresses}")
+        
+        # get token value and liquidity
+        token_prices = multi_price_res.json()['data']
+        token_list = tokenlist_res.json()['data']['tokens']
         
         return {
-            token: PriceInfo(value1=Decimal(data['value']), value2=Decimal(data['priceChange24h']))
-            for token, data in response.json()['data'].items()
+            token: PriceInfo(Decimal(data['value']), Decimal([t for t in token_list if t['address'] == token][0]['liquidity']))
+            for token, data in token_prices.items()
         }
 
 
 
-    # def fetch_token_overview(self, address: str) -> TokenOverview:
-    #     if not address:
-    #         raise ValueError("No tokens provided")
+    def fetch_token_overview(self, address: str) -> TokenOverview:
+        if not address:
+            raise NoPositionsError("No token provided")
         
-    #     url = f'https://public-api.birdeye.so/public/multi_price?list_address={address}'
-    #     response = self._make_api_call('get', url, headers=self._headers)
+        url = f'https://public-api.birdeye.so/public/exists_token?address={address}'
+        check_token_res = self._make_api_call('get', url, headers=self._headers)
+        if check_token_res.status_code != 200:
+            raise InvalidToken(f"Failed to fetch token {address}")
         
-    #     if response.status_code != 200:
-    #         raise ValueError(f"Failed to fetch prices for tokens {address}")
+        if not check_token_res.json()['data']["exists"]:
+            raise InvalidSolanaAddress("Invalid solana address")
         
-    #     return response.json()
-    #     # return {
-    #     #     token: data
-    #     #     for token, data in response.json()['data'].items()
-    #     # }
+        url = 'https://public-api.birdeye.so/public/tokenlist?sort_by=v24hUSD&sort_type=desc'
+        tokenlist_res = self._make_api_call('get', url, headers=self._headers)
+        if tokenlist_res.status_code != 200:
+            raise InvalidToken(f"Failed to fetch token {address}")
+        
+        return [t for t in tokenlist_res.json()['data']['tokens'] if t['address'] == address][0]
